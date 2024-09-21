@@ -74,6 +74,10 @@ class DefaultBuildTreeModelControllerServices : BuildTreeModelControllerServices
          */
         private
         val modelProjectDependencies = InternalFlag("org.gradle.internal.model-project-dependencies", true)
+
+        private
+        val isolatedProjectsTasksConfigureOnDemand =
+            InternalFlag("org.gradle.internal.isolated-projects.configure-on-demand.tasks", false)
     }
 
     override fun servicesForBuildTree(requirements: BuildActionModelRequirements): BuildTreeModelControllerServices.Supplier {
@@ -86,18 +90,51 @@ class DefaultBuildTreeModelControllerServices : BuildTreeModelControllerServices
             }
         }
 
+        val configurationCacheLogLevel = if (startParameter.isConfigurationCacheQuiet) LogLevel.INFO else LogLevel.LIFECYCLE
+        val modelParameters = getBuildModelParameters(
+            requirements,
+            startParameter,
+            configurationCacheLogLevel
+        )
+
+        if (!startParameter.isConfigurationCacheQuiet) {
+            if (modelParameters.isIsolatedProjects) {
+                IncubationLogger.incubatingFeatureUsed("Isolated projects")
+            }
+        }
+        if (!modelParameters.isIsolatedProjects && modelParameters.isConfigureOnDemand) {
+            IncubationLogger.incubatingFeatureUsed("Configuration on demand")
+        }
+
+        val loggingParameters = ConfigurationCacheLoggingParameters(configurationCacheLogLevel)
+        val buildFeatures = DefaultBuildFeatures(startParameter, modelParameters)
+
+        return BuildTreeModelControllerServices.Supplier { registration ->
+            val buildType = if (requirements.isRunsTasks) BuildType.TASKS else BuildType.MODEL
+            registration.add(BuildType::class.java, buildType)
+            registerCommonBuildTreeServices(registration, modelParameters, buildFeatures, requirements, loggingParameters)
+        }
+    }
+
+    private
+    fun getBuildModelParameters(
+        requirements: BuildActionModelRequirements,
+        startParameter: StartParameterInternal,
+        configurationCacheLogLevel: LogLevel
+    ): BuildModelParameters {
+
         val options = DefaultInternalOptions(startParameter.systemPropertiesArgs)
         val isolatedProjects = startParameter.isolatedProjects.get()
         val parallelProjectExecution = isolatedProjects || requirements.startParameter.isParallelProjectExecutionEnabled
         val parallelToolingActions = parallelProjectExecution && options.getOption(parallelBuilding).get()
         val invalidateCoupledProjects = isolatedProjects && options.getOption(invalidateCoupledProjects).get()
         val modelAsProjectDependency = isolatedProjects && options.getOption(modelProjectDependencies).get()
-        val configurationCacheLogLevel = if (startParameter.isConfigurationCacheQuiet) LogLevel.INFO else LogLevel.LIFECYCLE
-        val modelParameters = if (requirements.isCreatesModel) {
+
+        return if (requirements.isCreatesModel) {
             // When creating a model, disable certain features - only enable configure on demand and configuration cache when isolated projects is enabled
             DefaultBuildModelParameters(
                 parallelProjectExecution = parallelProjectExecution,
-                configureOnDemand = isolatedProjects,
+                configureOnDemand = false,
                 configurationCache = isolatedProjects,
                 isolatedProjects = isolatedProjects,
                 requiresBuildModel = true,
@@ -108,7 +145,9 @@ class DefaultBuildTreeModelControllerServices : BuildTreeModelControllerServices
             )
         } else {
             val configurationCache = isolatedProjects || startParameter.configurationCache.get()
-            val configureOnDemand = isolatedProjects || startParameter.isConfigureOnDemand
+            val configureOnDemand =
+                if (isolatedProjects) options.getOption(isolatedProjectsTasksConfigureOnDemand).get()
+                else startParameter.isConfigureOnDemand
 
             fun disabledConfigurationCacheBuildModelParameters(buildOptionReason: String): BuildModelParameters {
                 logger.log(configurationCacheLogLevel, "{} as configuration cache cannot be reused due to --{}", requirements.actionDisplayName.capitalizedDisplayName, buildOptionReason)
@@ -128,6 +167,8 @@ class DefaultBuildTreeModelControllerServices : BuildTreeModelControllerServices
             when {
                 configurationCache && startParameter.writeDependencyVerifications.isNotEmpty() -> disabledConfigurationCacheBuildModelParameters(StartParameterBuildOptions.DependencyVerificationWriteOption.LONG_OPTION)
                 configurationCache && startParameter.isExportKeys -> disabledConfigurationCacheBuildModelParameters(StartParameterBuildOptions.ExportKeysOption.LONG_OPTION)
+                // Disable configuration cache when generating a property upgrade report, since report is generated during configuration phase, and we currently don't reference it in cc cache
+                configurationCache && startParameter.isPropertyUpgradeReportEnabled -> disabledConfigurationCacheBuildModelParameters(StartParameterBuildOptions.PropertyUpgradeReportOption.LONG_OPTION)
                 else -> DefaultBuildModelParameters(
                     parallelProjectExecution = parallelProjectExecution,
                     configureOnDemand = configureOnDemand,
@@ -140,24 +181,6 @@ class DefaultBuildTreeModelControllerServices : BuildTreeModelControllerServices
                     modelAsProjectDependency = modelAsProjectDependency
                 )
             }
-        }
-
-        if (!startParameter.isConfigurationCacheQuiet) {
-            if (modelParameters.isIsolatedProjects) {
-                IncubationLogger.incubatingFeatureUsed("Isolated projects")
-            }
-        }
-        if (!modelParameters.isIsolatedProjects && modelParameters.isConfigureOnDemand) {
-            IncubationLogger.incubatingFeatureUsed("Configuration on demand")
-        }
-
-        val loggingParameters = ConfigurationCacheLoggingParameters(configurationCacheLogLevel)
-        val buildFeatures = DefaultBuildFeatures(startParameter, modelParameters)
-
-        return BuildTreeModelControllerServices.Supplier { registration ->
-            val buildType = if (requirements.isRunsTasks) BuildType.TASKS else BuildType.MODEL
-            registration.add(BuildType::class.java, buildType)
-            registerCommonBuildTreeServices(registration, modelParameters, buildFeatures, requirements, loggingParameters)
         }
     }
 

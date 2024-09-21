@@ -71,12 +71,14 @@ public class JdkJavaCompiler implements Compiler<JavaCompileSpec>, Serializable 
         try {
             task = createCompileTask(spec, result);
         } catch (RuntimeException ex) {
-            throw problemsService.getInternalReporter().rethrowing(ex, builder -> buildProblemFrom(ex, builder));
+            throw problemsService.getInternalReporter().throwing(builder -> {
+                buildProblemFrom(ex, builder);
+            });
         }
         boolean success = task.call();
         diagnosticToProblemListener.printDiagnosticCounts();
         if (!success) {
-            throw new CompilationFailedException(result);
+            throw new CompilationFailedException(result, diagnosticToProblemListener.getReportedProblems());
         }
         return result;
     }
@@ -124,10 +126,10 @@ public class JdkJavaCompiler implements Compiler<JavaCompileSpec>, Serializable 
         return false;
     }
 
-    private void buildProblemFrom(RuntimeException ex, ProblemSpec spec) {
+    private static void buildProblemFrom(RuntimeException ex, ProblemSpec spec) {
         spec.severity(Severity.ERROR);
         spec.id("initialization-failed", "Java compilation initialization error", GradleCoreProblemGroup.compilation().java());
-        spec.details(ex.getLocalizedMessage());
+        spec.contextualLabel(ex.getLocalizedMessage());
         spec.withException(ex);
     }
 
