@@ -1,12 +1,12 @@
-# Gradle architecture documentation
+# Gradle architectural documentation
 
 This directory contains documentation that describes Gradle's architecture and how the various pieces fit together and work.
 
-## Architecture decision records (ADRs)
+## Architecture decision making (ADM)
 
-The Gradle team uses ADRs to record architectural decisions that the team has made.
+The Gradle team uses ADM to make architectural decisions that the team has made.
 
-See [Architecture decisions records](standards) for the list of ADRs.
+See [Architecture decisions records](superior) for the list of ADM.
 Be aware these are very technical descriptions of the decisions, and you might find the documentation below more useful as an introduction to the internals of Gradle.
 
 ## Platform architecture
